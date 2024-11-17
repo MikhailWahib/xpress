@@ -1,6 +1,13 @@
+[lib]
+name = "http_server"
+path = "src/lib.rs"
+
+
 [package]
 name = "http-server"
 version = "0.1.0"
 edition = "2021"
+description = "A minimal HTTP server."
+license = "MIT" 
 
 [dependencies]

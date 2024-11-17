@@ -1,82 +1,65 @@
+mod thread_pool;
+
 use std::{
-    sync::{mpsc, Arc, Mutex},
+    fs,
+    io::{BufRead, BufReader, Error, ErrorKind, Result, Write},
+    net::{TcpListener, TcpStream},
     thread,
+    time::Duration,
 };
 
-pub struct ThreadPool {
-    workers: Vec<Worker>,
-    sender: Option<mpsc::Sender<Job>>,
+use thread_pool::ThreadPool;
+
+pub struct HttpServer {
+    address: String,
+    thread_count: usize,
 }
 
-type Job = Box<dyn FnOnce() + Send + 'static>;
-
-impl ThreadPool {
-    pub fn new(size: usize) -> ThreadPool {
-        assert!(size > 0);
-
-        let mut workers = Vec::with_capacity(size);
-        let (sender, receiver) = mpsc::channel();
-        let receiver = Arc::new(Mutex::new(receiver));
-
-        for id in 0..size {
-            workers.push(Worker::new(id, Arc::clone(&receiver)));
-        }
-
-        ThreadPool {
-            workers,
-            sender: Some(sender),
+impl HttpServer {
+    pub fn new(address: impl Into<String>, thread_count: usize) -> Self {
+        Self {
+            address: address.into(),
+            thread_count,
         }
     }
 
-    pub fn execute<F>(&self, f: F)
-    where
-        F: FnOnce() + Send + 'static,
-    {
-        let job = Box::new(f);
+    pub fn run(&self) -> Result<()> {
+        let pool = ThreadPool::new(self.thread_count);
+        let listener = TcpListener::bind(&self.address)?;
 
-        self.sender.as_ref().unwrap().send(job).unwrap();
-    }
-}
-
-impl Drop for ThreadPool {
-    fn drop(&mut self) {
-        drop(self.sender.take());
-
-        for worker in &mut self.workers {
-            println!("Shutting down worker: {}.", worker.id);
-
-            if let Some(thread) = worker.thread.take() {
-                thread.join().unwrap();
-            }
-        }
-    }
-}
-
-struct Worker {
-    id: usize,
-    thread: Option<thread::JoinHandle<()>>,
-}
-
-impl Worker {
-    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
-        let thread = thread::spawn(move || loop {
-            let msg = receiver.lock().unwrap().recv();
-
-            match msg {
-                Ok(job) => {
-                    println!("Worker {id} got a job; executing.");
-                    job();
+        for stream in listener.incoming() {
+            let stream = stream?;
+            pool.execute(|| {
+                if let Err(e) = Self::handle_connection(stream) {
+                    eprintln!("Error handling connection: {}", e);
                 }
-                Err(_) => {
-                    println!("Worker {id} disconnected; shutting down.");
-                    break;
-                }
-            }
-        });
-
-        Worker {
-            id,
-            thread: Some(thread),
+            });
         }
+
+        Ok(())
+    }
+
+    fn handle_connection(mut stream: TcpStream) -> Result<()> {
+        let buf_reader = BufReader::new(&stream);
+        let req = buf_reader
+            .lines()
+            .next()
+            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Empty request"))??;
+
+        let (status_line, filename) = match &req[..] {
+            "GET / HTTP/1.1" => ("HTTP/1.1 200 OK", "hello.html"),
+            "GET /sleep HTTP/1.1" => {
+                thread::sleep(Duration::from_secs(4));
+                ("HTTP/1.1 200 OK", "hello.html")
+            }
+            _ => ("HTTP/1.1 404 NOT FOUND", "404.html"),
+        };
+
+        let contents = fs::read_to_string(filename)?;
+        let length = contents.len();
+        let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
+
+        stream.write_all(response.as_bytes())?;
+        Ok(())
     }
 }
