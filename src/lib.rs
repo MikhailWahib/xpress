@@ -1,65 +1,97 @@
-mod thread_pool;
-
+pub mod request;
+pub mod response;
+use request::Request;
+use response::Response;
 use std::{
-    fs,
-    io::{BufRead, BufReader, Error, ErrorKind, Result, Write},
+    collections::HashMap,
+    io::{BufRead, BufReader, Write},
     net::{TcpListener, TcpStream},
+    sync::{Arc, Mutex},
     thread,
-    time::Duration,
 };
-
-use thread_pool::ThreadPool;
 
 pub struct HttpServer {
     address: String,
-    thread_count: usize,
+    routes: Arc<Mutex<HashMap<(String, String), HandlerFn>>>,
+    // template_dir: String,
 }
 
+type HandlerFn = fn(&Request, &mut Response);
+
 impl HttpServer {
-    pub fn new(address: impl Into<String>, thread_count: usize) -> Self {
+    pub fn new(address: &str) -> Self {
         Self {
-            address: address.into(),
-            thread_count,
+            address: address.to_string(),
+            routes: Arc::new(Mutex::new(HashMap::new())),
+            // template_dir: String::new(),
         }
     }
 
-    pub fn run(&self) -> Result<()> {
-        let pool = ThreadPool::new(self.thread_count);
-        let listener = TcpListener::bind(&self.address)?;
+    pub fn listen(&self) {
+        let listener = TcpListener::bind(&self.address).unwrap();
 
         for stream in listener.incoming() {
-            let stream = stream?;
-            pool.execute(|| {
-                if let Err(e) = Self::handle_connection(stream) {
-                    eprintln!("Error handling connection: {}", e);
-                }
-            });
-        }
+            match stream {
+                Ok(stream) => {
+                    let routes = Arc::clone(&self.routes);
 
-        Ok(())
+                    thread::spawn(move || {
+                        handle_connection(stream, routes);
+                    });
+                }
+                Err(e) => println!("Error: {}", e),
+            }
+        }
     }
 
-    fn handle_connection(mut stream: TcpStream) -> Result<()> {
-        let buf_reader = BufReader::new(&stream);
-        let req = buf_reader
-            .lines()
-            .next()
-            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Empty request"))??;
+    pub fn get(&mut self, path: &str, handler: HandlerFn) {
+        self.routes
+            .lock()
+            .unwrap()
+            .insert(("GET".to_string(), path.to_string()), handler);
+    }
+}
 
-        let (status_line, filename) = match &req[..] {
-            "GET / HTTP/1.1" => ("HTTP/1.1 200 OK", "hello.html"),
-            "GET /sleep HTTP/1.1" => {
-                thread::sleep(Duration::from_secs(4));
-                ("HTTP/1.1 200 OK", "hello.html")
-            }
-            _ => ("HTTP/1.1 404 NOT FOUND", "404.html"),
-        };
+fn handle_connection(
+    mut stream: TcpStream,
+    routes: Arc<Mutex<HashMap<(String, String), HandlerFn>>>,
+) {
+    let mut buf_reader = BufReader::new(&stream);
+    let mut buffer = String::new();
 
-        let contents = fs::read_to_string(filename)?;
-        let length = contents.len();
-        let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
+    let bytes = buf_reader.read_line(&mut buffer).unwrap();
+    if bytes == 0 {
+        return;
+    }
 
-        stream.write_all(response.as_bytes())?;
-        Ok(())
+    let request = Request::from(&buffer);
+    println!("{:?}", request);
+
+    let mut response = Response::new();
+
+    let routes = routes.lock().unwrap();
+    let handler = routes
+        .get(&(request.method.to_string(), request.path.to_string()))
+        .unwrap();
+
+    handler(&request, &mut response);
+
+    response.send(response.body.clone()).unwrap();
+
+    let response_string = format!(
+        "HTTP/1.1 {}\r\n{}\r\nContent-Length: {}\r\n\r\n{}",
+        response.status,
+        response
+            .headers
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k, v))
+            .collect::<Vec<String>>()
+            .join("\r\n"),
+        response.body.len(),
+        String::from_utf8_lossy(&response.body)
+    );
+
+    if response.sent {
+        stream.write_all(response_string.as_bytes()).unwrap();
     }
 }
