@@ -56,10 +56,13 @@ fn handle_connection(
     let request = Request::from(&mut buf_reader);
 
     let mut response = Response::new();
-    let routes = routes.lock().unwrap();
-    let handler = routes
-        .get(&(request.method.to_string(), request.path.to_string()))
-        .unwrap();
+    let handler: HandlerFn;
+    {
+        let routes = routes.lock().unwrap();
+        handler = *routes
+            .get(&(request.method.to_string(), request.path.to_string()))
+            .unwrap();
+    }
 
     handler(&request, &mut response);
 
