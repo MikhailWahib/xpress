@@ -10,7 +10,7 @@ use std::{
     thread,
 };
 
-pub struct HttpServer {
+pub struct Xpress {
     address: String,
     routes: Arc<Mutex<HashMap<(String, String), HandlerFn>>>,
     // template_dir: String,
@@ -18,7 +18,7 @@ pub struct HttpServer {
 
 type HandlerFn = fn(&Request, &mut Response);
 
-impl HttpServer {
+impl Xpress {
     pub fn new(address: &str) -> Self {
         Self {
             address: address.to_string(),

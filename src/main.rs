@@ -1,5 +1,7 @@
+use std::{thread, time::Duration};
+
 use serde::{Deserialize, Serialize};
-use xpress::HttpServer;
+use xpress::Xpress;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct User {
@@ -15,13 +17,14 @@ struct UserRes {
 }
 
 fn main() {
-    let mut app = HttpServer::new("127.0.0.1:8080");
+    let mut app = Xpress::new("127.0.0.1:8080");
 
     app.get("/hi", |_req, res| {
         res.html("<h1>Welcome to homepage!</h1>").unwrap();
     });
 
     app.get("/user", |_req, res| {
+        thread::sleep(Duration::from_secs(10));
         let user = User {
             name: "John Doe".to_string(),
             age: 30,
