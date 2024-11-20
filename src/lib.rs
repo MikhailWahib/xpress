@@ -4,7 +4,7 @@ use request::Request;
 use response::Response;
 use std::{
     collections::HashMap,
-    io::{BufRead, BufReader, Write},
+    io::{BufReader, Write},
     net::{TcpListener, TcpStream},
     sync::{Arc, Mutex},
     thread,
@@ -31,16 +31,11 @@ impl HttpServer {
         let listener = TcpListener::bind(&self.address).unwrap();
 
         for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    let routes = Arc::clone(&self.routes);
-
-                    thread::spawn(move || {
-                        handle_connection(stream, routes);
-                    });
-                }
-                Err(e) => println!("Error: {}", e),
-            }
+            let stream = stream.unwrap();
+            let routes = Arc::clone(&self.routes);
+            thread::spawn(move || {
+                handle_connection(stream, routes);
+            });
         }
     }
 
@@ -57,18 +52,10 @@ fn handle_connection(
     routes: Arc<Mutex<HashMap<(String, String), HandlerFn>>>,
 ) {
     let mut buf_reader = BufReader::new(&stream);
-    let mut buffer = String::new();
 
-    let bytes = buf_reader.read_line(&mut buffer).unwrap();
-    if bytes == 0 {
-        return;
-    }
-
-    let request = Request::from(&buffer);
-    println!("{:?}", request);
+    let request = Request::from(&mut buf_reader);
 
     let mut response = Response::new();
-
     let routes = routes.lock().unwrap();
     let handler = routes
         .get(&(request.method.to_string(), request.path.to_string()))
@@ -76,22 +63,25 @@ fn handle_connection(
 
     handler(&request, &mut response);
 
-    response.send(response.body.clone()).unwrap();
+    send_response(response, &mut stream);
+}
 
-    let response_string = format!(
-        "HTTP/1.1 {}\r\n{}\r\nContent-Length: {}\r\n\r\n{}",
-        response.status,
-        response
-            .headers
+fn send_response(mut res: Response, stream: &mut TcpStream) {
+    res.send(res.body.clone()).unwrap();
+
+    let res_string = format!(
+        "HTTP/1.1 {}\r\n{}\r\nContent-Length: {}\r\n\r\n{}\r\n",
+        res.status,
+        res.headers
             .iter()
             .map(|(k, v)| format!("{}: {}", k, v))
             .collect::<Vec<String>>()
             .join("\r\n"),
-        response.body.len(),
-        String::from_utf8_lossy(&response.body)
+        res.body.len(),
+        String::from_utf8_lossy(&res.body)
     );
 
-    if response.sent {
-        stream.write_all(response_string.as_bytes()).unwrap();
+    if res.sent {
+        stream.write_all(res_string.as_bytes()).unwrap();
     }
 }
