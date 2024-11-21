@@ -45,6 +45,27 @@ impl Xpress {
             .unwrap()
             .insert(("GET".to_string(), path.to_string()), handler);
     }
+
+    pub fn post(&mut self, path: &str, handler: HandlerFn) {
+        self.routes
+            .lock()
+            .unwrap()
+            .insert(("POST".to_string(), path.to_string()), handler);
+    }
+
+    pub fn put(&mut self, path: &str, handler: HandlerFn) {
+        self.routes
+            .lock()
+            .unwrap()
+            .insert(("PUT".to_string(), path.to_string()), handler);
+    }
+
+    pub fn delete(&mut self, path: &str, handler: HandlerFn) {
+        self.routes
+            .lock()
+            .unwrap()
+            .insert(("DELETE".to_string(), path.to_string()), handler);
+    }
 }
 
 fn handle_connection(
