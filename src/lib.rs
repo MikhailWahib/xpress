@@ -1,5 +1,8 @@
 pub mod request;
 pub mod response;
+mod thread_pool;
+
+use num_cpus;
 use request::Request;
 use response::Response;
 use std::{
@@ -9,6 +12,7 @@ use std::{
     sync::{Arc, Mutex},
     thread,
 };
+use thread_pool::ThreadPool;
 
 pub struct Xpress {
     address: String,
@@ -28,12 +32,16 @@ impl Xpress {
     }
 
     pub fn listen(&self) {
+        let cpu_num = num_cpus::get();
+        let pool = ThreadPool::new(cpu_num * 2);
+
         let listener = TcpListener::bind(&self.address).unwrap();
 
         for stream in listener.incoming() {
             let stream = stream.unwrap();
             let routes = Arc::clone(&self.routes);
-            thread::spawn(move || {
+
+            pool.execute(move || {
                 handle_connection(stream, routes);
             });
         }
