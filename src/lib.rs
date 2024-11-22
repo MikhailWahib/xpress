@@ -10,14 +10,12 @@ use std::{
     io::{BufReader, Write},
     net::{TcpListener, TcpStream},
     sync::{Arc, Mutex},
-    thread,
 };
 use thread_pool::ThreadPool;
 
 pub struct Xpress {
     address: String,
     routes: Arc<Mutex<HashMap<(String, String), HandlerFn>>>,
-    // template_dir: String,
 }
 
 type HandlerFn = fn(&Request, &mut Response);
@@ -27,7 +25,6 @@ impl Xpress {
         Self {
             address: address.to_string(),
             routes: Arc::new(Mutex::new(HashMap::new())),
-            // template_dir: String::new(),
         }
     }
 

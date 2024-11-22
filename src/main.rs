@@ -1,5 +1,3 @@
-use std::{thread, time::Duration};
-
 use serde::{Deserialize, Serialize};
 use xpress::Xpress;
 
@@ -16,15 +14,16 @@ struct UserRes {
     user: User,
 }
 
-fn main() {
-    let mut app = Xpress::new("127.0.0.1:8080");
+const PORT: u16 = 8080;
 
-    app.get("/hi", |_req, res| {
+fn main() {
+    let mut app = Xpress::new(&format!("127.0.0.1:{}", PORT));
+
+    app.get("/", |_req, res| {
         res.html("<h1>Welcome to homepage!</h1>").unwrap();
     });
 
     app.get("/user", |_req, res| {
-        thread::sleep(Duration::from_secs(10));
         let user = User {
             name: "John Doe".to_string(),
             age: 30,
@@ -35,8 +34,10 @@ fn main() {
             message: "Hello, world!".to_string(),
             user,
         };
+
         res.json(serde_json::to_string(&response).unwrap()).unwrap();
     });
 
+    println!("Listening on port: {}", PORT);
     app.listen();
 }

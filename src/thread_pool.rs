@@ -3,7 +3,7 @@ use std::{
     thread,
 };
 
-pub(crate) struct ThreadPool {
+pub struct ThreadPool {
     workers: Vec<Worker>,
     sender: Option<mpsc::Sender<Job>>,
 }
@@ -11,7 +11,7 @@ pub(crate) struct ThreadPool {
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
 impl ThreadPool {
-    pub(crate) fn new(size: usize) -> ThreadPool {
+    pub fn new(size: usize) -> ThreadPool {
         assert!(size > 0);
 
         let mut workers = Vec::with_capacity(size);
@@ -28,7 +28,7 @@ impl ThreadPool {
         }
     }
 
-    pub(crate) fn execute<F>(&self, f: F)
+    pub fn execute<F>(&self, f: F)
     where
         F: FnOnce() + Send + 'static,
     {
