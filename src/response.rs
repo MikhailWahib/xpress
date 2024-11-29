@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Error};
+use std::{collections::HashMap, fs, io::Error};
 
 #[derive(Debug)]
 pub struct Response {
@@ -48,11 +48,12 @@ impl Response {
         }
     }
 
-    pub fn html(&mut self, body: impl Into<Vec<u8>>) -> Result<(), Error> {
+    pub fn html(&mut self, path: &str) -> Result<(), ()> {
         self.headers
             .insert("Content-Type".to_string(), "text/html".to_string());
 
-        self.body = body.into();
+        let file = fs::read_to_string(path).unwrap();
+        self.body = file.into();
         self.sent = true;
         Ok(())
     }

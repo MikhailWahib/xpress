@@ -27,6 +27,8 @@ fn main() {
         users: Arc::new(Mutex::new(Vec::new())),
     };
 
+    app.get("/", |_req, res| res.html("hello.html").unwrap());
+
     let users_get = Arc::clone(&app_state.users);
     app.get("/users", move |_req, res| match users_get.lock() {
         Ok(users) => {
