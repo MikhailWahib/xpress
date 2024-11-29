@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
-use serde_json::ser;
 use std::sync::{Arc, Mutex};
 use xpress::Xpress;
+
+struct AppState {
+    users: Arc<Mutex<Vec<User>>>,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct User {
@@ -20,28 +23,46 @@ const PORT: u16 = 8080;
 
 fn main() {
     let mut app = Xpress::new(&format!("127.0.0.1:{}", PORT));
+    let app_state = AppState {
+        users: Arc::new(Mutex::new(Vec::new())),
+    };
 
-    let users = Arc::new(Mutex::new(Vec::new()));
-
-    let users_get = Arc::clone(&users);
-    app.get("/users", move |_req, res| {
-        let users = users_get.lock().unwrap();
-        let users_res = serde_json::to_string(&*users);
-        res.json(users_res.unwrap()).unwrap();
+    let users_get = Arc::clone(&app_state.users);
+    app.get("/users", move |_req, res| match users_get.lock() {
+        Ok(users) => {
+            res.json(&*users).unwrap();
+        }
+        Err(_) => {
+            res.status(500);
+            res.send("Internal Server Error!").unwrap();
+        }
     });
 
-    let users_post = Arc::clone(&users);
+    let users_post = Arc::clone(&app_state.users);
     app.post("/users", move |req, res| {
-        let user: User = serde_json::from_str(&req.body).unwrap();
+        match serde_json::from_str::<User>(&req.body) {
+            Ok(user) => {
+                let response = UserRes {
+                    message: "User created".to_string(),
+                    user: user.clone(),
+                };
 
-        let res_msg = UserRes {
-            message: "User created".to_string(),
-            user: user.clone(),
-        };
-
-        users_post.lock().unwrap().push(user);
-
-        res.json(ser::to_string(&res_msg).unwrap()).unwrap();
+                match users_post.lock() {
+                    Ok(mut users) => {
+                        users.push(user);
+                        res.json(&response).unwrap();
+                    }
+                    Err(_) => {
+                        res.status(500);
+                        res.send("Internal Server Error!").unwrap();
+                    }
+                }
+            }
+            Err(_) => {
+                res.status(400);
+                res.send("Invalid user data").unwrap();
+            }
+        }
     });
 
     app.listen();
