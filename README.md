@@ -1,6 +1,9 @@
 # Xpress: A Lightweight HTTP Framework for Rust.
 
-**Xpress** is a minimalistic, HTTP framework built from scratch in Rust. It aims to demonstrate the inner workings of web frameworks by implementing core features like routing, request parsing, and response handling in a simple yet extensible way. Perfect for developers looking to deepen their understanding of Rust and HTTP server mechanics.
+**Xpress** is a minimalistic, HTTP framework built from scratch in Rust. It aims to demonstrate the inner workings of web frameworks by implementing core features like routing, request parsing, and response handling in a simple yet extensible way.
+
+
+_Note: This project is not intended for production use. It is designed to be a simple example of how an HTTP framework could be built from scratch in Rust, and should not be used in production environments._
 
 ---
 
