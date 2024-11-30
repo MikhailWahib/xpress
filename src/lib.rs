@@ -1,6 +1,9 @@
+pub mod error;
 pub mod request;
 pub mod response;
 mod thread_pool;
+
+use error::XpressError;
 use num_cpus;
 use request::Request;
 use response::Response;
@@ -28,16 +31,23 @@ impl Xpress {
     }
 
     pub fn listen(&self) {
-        let cpu_num = num_cpus::get();
-        let pool = ThreadPool::new(cpu_num * 2);
-        let listener = TcpListener::bind(&self.address).unwrap();
+        let listener = TcpListener::bind(&self.address).expect("Failed to bind to address");
+        let pool = ThreadPool::new(num_cpus::get());
 
         for stream in listener.incoming() {
-            let stream = stream.unwrap();
-            let routes = Arc::clone(&self.routes);
-            pool.execute(move || {
-                handle_connection(stream, routes);
-            });
+            match stream {
+                Ok(stream) => {
+                    let routes = Arc::clone(&self.routes);
+                    pool.execute(move || {
+                        if let Err(err) = handle_connection(stream, routes) {
+                            eprintln!("Connection error: {}", err);
+                        }
+                    });
+                }
+                Err(err) => {
+                    eprintln!("Failed to accept connection: {}", err);
+                }
+            }
         }
     }
 
@@ -85,13 +95,15 @@ impl Xpress {
 fn handle_connection(
     mut stream: TcpStream,
     routes: Arc<Mutex<HashMap<(String, String), HandlerFn>>>,
-) {
+) -> Result<(), XpressError> {
     let mut buf_reader = BufReader::new(&stream);
     let request = Request::from(&mut buf_reader);
     let mut response = Response::new();
 
     let handler = {
-        let routes = routes.lock().unwrap();
+        let routes = routes
+            .lock()
+            .map_err(|_| XpressError::MutexError("Failed to acquire routes lock".to_string()))?;
         routes
             .get(&(request.method.to_string(), request.path.to_string()))
             .cloned()
@@ -99,24 +111,29 @@ fn handle_connection(
 
     if let Some(handler) = handler {
         handler(&request, &mut response);
-        send_response(response, &mut stream);
+        send_response(response, &mut stream)?;
+    } else {
+        response.status(404);
+        response.send("Not Found")?;
+        send_response(response, &mut stream)?;
     }
+    Ok(())
 }
 
-fn send_response(mut res: Response, stream: &mut TcpStream) {
-    res.send(res.body.clone()).unwrap();
-    let res_string = format!(
-        "HTTP/1.1 {}\r\n{}\r\nContent-Length: {}\r\n\r\n{}\r\n",
-        res.status,
-        res.headers
-            .iter()
-            .map(|(k, v)| format!("{}: {}", k, v))
-            .collect::<Vec<String>>()
-            .join("\r\n"),
-        res.body.len(),
-        String::from_utf8_lossy(&res.body)
-    );
+fn send_response(res: Response, stream: &mut TcpStream) -> Result<(), XpressError> {
     if res.sent {
-        stream.write_all(res_string.as_bytes()).unwrap();
+        let response_string = format!(
+            "HTTP/1.1 {}\r\n{}\r\nContent-Length: {}\r\n\r\n{}\r\n",
+            res.status,
+            res.headers
+                .iter()
+                .map(|(k, v)| format!("{}: {}", k, v))
+                .collect::<Vec<_>>()
+                .join("\r\n"),
+            res.body.len(),
+            String::from_utf8_lossy(&res.body)
+        );
+        stream.write_all(response_string.as_bytes())?;
     }
+    Ok(())
 }
