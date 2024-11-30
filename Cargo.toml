@@ -9,6 +9,7 @@ version = "0.1.3"
 edition = "2021"
 description = "A minimal HTTP library."
 license = "MIT" 
+authors = ["Mikhail Wahib <mikhailwahib20@gmail.com>"]
 repository = "https://github.com/MikhailWahib/xpress"
 keywords = ["express", "xpress", "http"]
 
