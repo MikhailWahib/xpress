@@ -31,7 +31,7 @@ fn main() {
         users: Arc::new(Mutex::new(Vec::new())),
     };
 
-    app.get("/", |_req, res| match res.html("hello.html") {
+    app.get("/", |_req, res| match res.html("examples/hello.html") {
         Ok(_) => (),
         Err(err) => {
             res.status(500);
