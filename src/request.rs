@@ -90,3 +90,22 @@ fn parse_query_string(query: &str) -> HashMap<String, String> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+    use tokio::io::BufReader;
+
+    #[tokio::test]
+    async fn test_request_parsing() {
+        let raw_request = b"GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let mut reader = BufReader::new(Cursor::new(raw_request));
+
+        let request = Request::from_stream(&mut reader).await.unwrap();
+
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/hello");
+        assert_eq!(request.headers.get("host").unwrap(), "localhost");
+    }
+}
