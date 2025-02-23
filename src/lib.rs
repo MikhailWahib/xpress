@@ -51,44 +51,41 @@ impl Xpress {
         }
     }
 
+    fn register_route<F>(&mut self, method: &str, path: &str, handler: F)
+    where
+        F: Fn(&Request, &mut Response) + Send + Sync + 'static,
+    {
+        let mut routes = self.routes.lock().unwrap();
+
+        routes.insert((method.to_string(), path.to_string()), Arc::new(handler));
+    }
+
     pub fn get<F>(&mut self, path: &str, handler: F)
     where
         F: Fn(&Request, &mut Response) + Send + Sync + 'static,
     {
-        self.routes
-            .lock()
-            .unwrap()
-            .insert(("GET".to_string(), path.to_string()), Arc::new(handler));
+        self.register_route("GET", path, handler);
     }
 
     pub fn post<F>(&mut self, path: &str, handler: F)
     where
         F: Fn(&Request, &mut Response) + Send + Sync + 'static,
     {
-        self.routes
-            .lock()
-            .unwrap()
-            .insert(("POST".to_string(), path.to_string()), Arc::new(handler));
+        self.register_route("POST", path, handler);
     }
 
     pub fn put<F>(&mut self, path: &str, handler: F)
     where
         F: Fn(&Request, &mut Response) + Send + Sync + 'static,
     {
-        self.routes
-            .lock()
-            .unwrap()
-            .insert(("PUT".to_string(), path.to_string()), Arc::new(handler));
+        self.register_route("PUT", path, handler);
     }
 
     pub fn delete<F>(&mut self, path: &str, handler: F)
     where
         F: Fn(&Request, &mut Response) + Send + Sync + 'static,
     {
-        self.routes
-            .lock()
-            .unwrap()
-            .insert(("DELETE".to_string(), path.to_string()), Arc::new(handler));
+        self.register_route("DELETE", path, handler);
     }
 }
 
