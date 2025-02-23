@@ -1,8 +1,9 @@
 use std::fmt;
+use tokio::io;
 
 #[derive(Debug)]
 pub enum XpressError {
-    IoError(std::io::Error),
+    IoError(io::Error),
     JsonError(serde_json::Error),
     MutexError(String),
     FileNotFound(String),
@@ -21,8 +22,10 @@ impl fmt::Display for XpressError {
     }
 }
 
-impl From<std::io::Error> for XpressError {
-    fn from(err: std::io::Error) -> Self {
+impl std::error::Error for XpressError {}
+
+impl From<io::Error> for XpressError {
+    fn from(err: io::Error) -> Self {
         XpressError::IoError(err)
     }
 }

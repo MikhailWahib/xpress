@@ -1,13 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::{
-    sync::{Arc, Mutex},
-    thread,
-    time::Duration,
-};
-use xpress::{error::XpressError, Xpress};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use xpress::{Xpress, XpressError};
 
 struct AppState {
-    users: Arc<Mutex<Vec<User>>>,
+    users: Vec<User>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -18,69 +15,174 @@ struct User {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct UserRes {
+struct UserResponse {
     message: String,
     user: User,
 }
 
-const PORT: u16 = 8080;
+#[derive(Serialize, Deserialize, Debug)]
+struct ErrorResponse {
+    message: String,
+}
 
-fn main() {
-    let mut app = Xpress::new(&format!("127.0.0.1:{}", PORT));
-    let app_state = AppState {
-        users: Arc::new(Mutex::new(Vec::new())),
-    };
+#[tokio::main]
+async fn main() -> Result<(), XpressError> {
+    // Initialize server
+    let mut app = Xpress::new("127.0.0.1:8080");
 
-    app.get("/", |_req, res| match res.html("examples/hello.html") {
-        Ok(_) => (),
-        Err(err) => {
-            res.status(500);
-            res.send(format!("Error rendering HTML: {}", err)).unwrap();
-        }
-    });
+    // Initialize state
+    let state = Arc::new(RwLock::new(AppState { users: Vec::new() }));
 
-    app.get("/delay", |_req, res| {
-        thread::sleep(Duration::from_secs(10));
-        res.send("Am I Late?").unwrap();
-    });
-
-    let users_get = Arc::clone(&app_state.users);
-    app.get("/users", move |_req, res| match users_get.lock() {
-        Ok(users) => {
-            res.json(&*users).unwrap();
-        }
-        Err(_) => {
-            res.status(500);
-            res.send("Internal Server Error!").unwrap();
-        }
-    });
-
-    let users_post = Arc::clone(&app_state.users);
-
-    app.post("/users", move |req, res| {
-        match serde_json::from_str::<User>(&req.body) {
-            Ok(user) => {
-                let mut users = users_post
-                    .lock()
-                    .map_err(|_| XpressError::MutexError("Failed to acquire lock".to_string()))
-                    .unwrap();
-                users.push(user.clone());
-                let response = UserRes {
-                    message: "User created".to_string(),
-                    user,
-                };
-                res.json(&response).unwrap_or_else(|err| {
-                    res.status(500);
-                    res.send(format!("Error sending response: {}", err))
-                        .unwrap();
-                });
-            }
+    // GET /
+    app.get("/", |_req, mut res| async move {
+        match res.html("examples/hello.html").await {
+            Ok(_) => Ok(res),
             Err(_) => {
-                res.status(400);
-                res.send("Invalid user data").unwrap();
+                res.status(500);
+                res.send("Internal Server Error").await?;
+                Ok(res)
             }
         }
-    });
+    })
+    .await;
 
-    app.listen();
+    // GET /users - List all users
+    let state_get = Arc::clone(&state);
+    app.get("/users", move |_req, mut res| {
+        let state_clone = state_get.clone();
+        async move {
+            let state = state_clone.read().await;
+            res.json(&state.users).await?;
+            Ok(res)
+        }
+    })
+    .await;
+
+    // POST /users - Create new user
+    let state_post = Arc::clone(&state);
+    app.post("/users", move |req, mut res| {
+        let state_clone = state_post.clone();
+        async move {
+            match serde_json::from_str::<User>(&req.body) {
+                Ok(user) => {
+                    // Validate user data
+                    if user.name.is_empty() || user.email.is_empty() {
+                        res.status(400);
+                        res.json(&ErrorResponse {
+                            message: "Name and email are required".to_string(),
+                        })
+                        .await?;
+                        return Ok(res);
+                    }
+
+                    // Store user
+                    let mut state = state_clone.write().await;
+                    state.users.push(user.clone());
+
+                    // Return success response
+                    res.status(201);
+                    res.json(&UserResponse {
+                        message: "User created successfully".to_string(),
+                        user,
+                    })
+                    .await?;
+                }
+                Err(e) => {
+                    res.status(400);
+                    res.json(&ErrorResponse {
+                        message: format!("Invalid user data: {}", e),
+                    })
+                    .await?;
+                }
+            }
+            Ok(res)
+        }
+    })
+    .await;
+
+    // PUT /users - Update user
+    let state_put = Arc::clone(&state);
+    app.put("/users", move |req, mut res| {
+        let state_clone = state_put.clone();
+        async move {
+            match serde_json::from_str::<User>(&req.body) {
+                Ok(updated_user) => {
+                    let mut state = state_clone.write().await;
+                    if let Some(user) = state
+                        .users
+                        .iter_mut()
+                        .find(|u| u.email == updated_user.email)
+                    {
+                        *user = updated_user.clone();
+                        res.json(&UserResponse {
+                            message: "User updated successfully".to_string(),
+                            user: updated_user,
+                        })
+                        .await?;
+                    } else {
+                        res.status(404);
+                        res.json(&ErrorResponse {
+                            message: "User not found".to_string(),
+                        })
+                        .await?;
+                    }
+                }
+                Err(e) => {
+                    res.status(400);
+                    res.json(&ErrorResponse {
+                        message: format!("Invalid user data: {}", e),
+                    })
+                    .await?;
+                }
+            }
+            Ok(res)
+        }
+    })
+    .await;
+
+    // DELETE /users - Delete user
+    let state_delete = Arc::clone(&state);
+    app.delete("/users", move |req, mut res| {
+        let state_clone = state_delete.clone();
+        async move {
+            #[derive(Deserialize)]
+            struct DeleteRequest {
+                email: String,
+            }
+
+            match serde_json::from_str::<DeleteRequest>(&req.body) {
+                Ok(delete_req) => {
+                    let mut state = state_clone.write().await;
+                    let initial_len = state.users.len();
+                    state.users.retain(|user| user.email != delete_req.email);
+
+                    if state.users.len() < initial_len {
+                        res.json(&ErrorResponse {
+                            message: "User deleted successfully".to_string(),
+                        })
+                        .await?;
+                    } else {
+                        res.status(404);
+                        res.json(&ErrorResponse {
+                            message: "User not found".to_string(),
+                        })
+                        .await?;
+                    }
+                }
+                Err(e) => {
+                    res.status(400);
+                    res.json(&ErrorResponse {
+                        message: format!("Invalid request data: {}", e),
+                    })
+                    .await?;
+                }
+            }
+            Ok(res)
+        }
+    })
+    .await;
+
+    println!("Server starting on http://127.0.0.1:8080");
+    app.listen().await?;
+    Ok(())
 }

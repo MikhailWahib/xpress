@@ -1,10 +1,8 @@
-use std::{
-    collections::HashMap,
-    io::{BufRead, BufReader, Read},
-    net::TcpStream,
-};
+use crate::error::XpressError;
+use std::collections::HashMap;
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Request {
     pub path: String,
     pub method: String,
@@ -26,64 +24,69 @@ impl Request {
         }
     }
 
-    pub fn from(buf_reader: &mut BufReader<&TcpStream>) -> Self {
+    pub async fn from_stream<T>(reader: &mut T) -> Result<Self, XpressError>
+    where
+        T: AsyncBufRead + Unpin,
+    {
         let mut request = Request::new();
-        let mut lines = buf_reader.lines();
+        let mut lines = reader.lines();
 
-        // Parse req line
-        if let Some(Ok(request_line)) = lines.next() {
-            let parts: Vec<&str> = request_line.split_whitespace().collect();
-            if parts.len() == 3 {
+        // Parse request line
+        if let Some(line) = lines.next_line().await? {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
                 request.method = parts[0].to_string();
-                request.path = parts[1].to_string();
+                let full_path = parts[1].to_string();
 
-                // parse query params
-                if let Some((path, query)) = request.path.clone().split_once('?') {
+                // Parse query parameters
+                if let Some((path, query)) = full_path.split_once('?') {
                     request.path = path.to_string();
-                    request.query = query
-                        .split('&')
-                        .filter_map(|pair| {
-                            let mut kv = pair.split('=');
-                            Some((
-                                kv.next()?.to_string(),
-                                kv.next().unwrap_or_default().to_string(),
-                            ))
-                        })
-                        .collect();
+                    request.query = parse_query_string(query);
+                } else {
+                    request.path = full_path;
                 }
+            } else {
+                return Err(XpressError::Custom("Invalid request line".to_string()));
             }
         }
 
         // Parse headers
-        let mut headers = HashMap::new();
-        for line in lines.by_ref() {
-            let line = match line {
-                Ok(line) => line,
-                Err(_) => break,
-            };
-
+        while let Some(line) = lines.next_line().await? {
             if line.is_empty() {
                 break;
             }
 
             if let Some((key, value)) = line.split_once(": ") {
-                headers.insert(key.to_string(), value.to_string());
+                request
+                    .headers
+                    .insert(key.to_lowercase(), value.trim().to_string());
             }
         }
-        request.headers = headers;
 
         // Parse body if Content-Length header is present
-        if let Some(content_length) = request
+        if let Some(length) = request
             .headers
-            .get("Content-Length")
+            .get("content-length")
             .and_then(|cl| cl.parse::<usize>().ok())
         {
-            let mut body = vec![0; content_length];
-            if buf_reader.read_exact(&mut body).is_ok() {
-                request.body = String::from_utf8_lossy(&body).to_string();
-            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).await?;
+            request.body = String::from_utf8_lossy(&body).to_string();
         }
 
-        request
+        Ok(request)
     }
+}
+
+fn parse_query_string(query: &str) -> HashMap<String, String> {
+    query
+        .split('&')
+        .filter_map(|pair| {
+            let mut parts = pair.split('=');
+            Some((
+                parts.next()?.to_string(),
+                parts.next().unwrap_or_default().to_string(),
+            ))
+        })
+        .collect()
 }
