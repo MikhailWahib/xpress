@@ -11,9 +11,10 @@ _Note: This project is not intended for production use. It is designed to be a s
 - **Routing**: Support for `GET`, `POST`, `PUT`, and `DELETE` methods.
 - **Request Handling**: Parse HTTP requests and extract information seamlessly.
 - **Response Management**: Send JSON, HTML, or plain text responses with ease.
-- **Thread Pooling**: Handle multiple client connections concurrently using a thread pool.
+- **Async Runtime**: Built on Tokio for efficient asynchronous request handling.
 - **Error Handling**: Custom error handling for robust and maintainable code.
 - **Educational Design**: Clear and commented implementation for learning purposes.
+- **Comprehensive Tests**: Unit and integration tests ensuring reliability.
 
 ---
 
@@ -31,33 +32,31 @@ xpress = "0.1.3"
 Here's a quick example to get started with `Xpress`:
 
 ```rust
-use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
-use xpress::Xpress;
+use xpress::{Xpress, XpressError};
 
-#[derive(Serialize, Deserialize, Clone)]
-struct User {
-    name: String,
-    age: u8,
-    email: String,
-}
-
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), XpressError> {
+    // Initialize server
     let mut app = Xpress::new("127.0.0.1:8080");
 
-    let state = Arc::new(Mutex::new(Vec::new()));
+    // GET /
+    app.get("/", |_req, mut res| async move {
+        match res.send("Hello World!").await {
+            Ok(_) => Ok(res),
+            Err(_) => {
+                res.status(500);
+                res.send("Internal Server Error").await?;
+                Ok(res)
+            }
+        }
+    })
+    .await;
 
-    // Define routes
-    app.get("/", |_req, res| res.html("hello.html").unwrap());
-
-    let users_state = Arc::clone(&state);
-    app.get("/users", move |_req, res| {
-        let users = users_state.lock().unwrap();
-        res.json(&*users).unwrap();
-    });
-
-    app.listen();
+    println!("Server starting on http://127.0.0.1:8080");
+    app.listen().await?;
+    Ok(())
 }
+
 ```
 
 ---
@@ -65,6 +64,33 @@ fn main() {
 ## 🧑‍💻 Contributing
 
 Contributions are welcome! Feel free to submit issues or pull requests to improve functionality, fix bugs, or add examples.
+
+---
+
+## Local Development
+
+To run the project locally, clone the repository and run the following commands:
+
+```bash
+# Clone the repository
+git clone https://github.com/MikhailWahib/xpress.git
+
+# Change the working directory
+cd xpress
+
+# Run the project
+cargo run
+```
+
+### Running Tests
+
+To run the tests, use the following command:
+
+```bash
+
+# Run the tests
+cargo test
+```
 
 ---
 
