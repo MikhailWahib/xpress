@@ -22,7 +22,7 @@ _Note: This project is not intended for production use. It is designed to be a s
 Add `Xpress` to your project by including it in your `Cargo.toml`:
 ```toml
 [dependencies]
-xpress = "0.1.3"
+xpress = "1.0.0"
 ```
 
 ---
