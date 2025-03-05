@@ -1,136 +1,131 @@
 pub mod error;
-pub mod request;
+mod request;
 pub mod response;
-mod thread_pool;
 
 use error::XpressError;
-use num_cpus;
 use request::Request;
 use response::Response;
-use std::{
-    collections::HashMap,
-    io::{BufReader, Write},
-    net::{TcpListener, TcpStream},
-    sync::{Arc, Mutex},
-};
-use thread_pool::ThreadPool;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::io::{AsyncWriteExt, BufReader};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
 
-type HandlerFn = Arc<dyn Fn(&Request, &mut Response) + Send + Sync + 'static>;
+type Handler = Box<dyn Fn(Request) -> Response + Send + Sync>;
 
 pub struct Xpress {
-    address: String,
-    routes: Arc<Mutex<HashMap<(String, String), HandlerFn>>>,
+    routes: Arc<Mutex<HashMap<String, (String, Handler)>>>,
 }
 
 impl Xpress {
-    pub fn new(address: &str) -> Self {
+    pub fn new() -> Self {
         Self {
-            address: address.to_string(),
             routes: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub fn listen(&self) {
-        let listener = TcpListener::bind(&self.address).expect("Failed to bind to address");
-        let pool = ThreadPool::new(num_cpus::get());
+    pub async fn listen(&self, addr: &str) -> Result<(), XpressError> {
+        let listener = TcpListener::bind(addr).await?;
+        println!("Server listening on {}", addr);
 
-        for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    let routes = Arc::clone(&self.routes);
-                    pool.execute(move || {
-                        if let Err(err) = handle_connection(stream, routes) {
-                            eprintln!("Connection error: {}", err);
-                        }
-                    });
+        loop {
+            let (socket, _) = listener.accept().await?;
+            let routes = Arc::clone(&self.routes);
+
+            tokio::spawn(async move {
+                if let Err(e) = Self::handle_connection(socket, routes).await {
+                    eprintln!("Error handling connection: {}", e);
                 }
-                Err(err) => {
-                    eprintln!("Failed to accept connection: {}", err);
-                }
-            }
+            });
         }
     }
 
-    fn register_route<F>(&mut self, method: &str, path: &str, handler: F)
+    pub async fn get<F>(&self, path: &str, handler: F)
     where
-        F: Fn(&Request, &mut Response) + Send + Sync + 'static,
+        F: Fn(Request) -> Response + Send + Sync + 'static,
     {
-        let mut routes = self.routes.lock().unwrap();
-
-        routes.insert((method.to_string(), path.to_string()), Arc::new(handler));
+        let mut routes = self.routes.lock().await;
+        routes.insert(path.to_string(), (String::from("GET"), Box::new(handler)));
     }
 
-    pub fn get<F>(&mut self, path: &str, handler: F)
+    pub async fn post<F>(&self, path: &str, handler: F)
     where
-        F: Fn(&Request, &mut Response) + Send + Sync + 'static,
+        F: Fn(Request) -> Response + Send + Sync + 'static,
     {
-        self.register_route("GET", path, handler);
+        let mut routes = self.routes.lock().await;
+        routes.insert(path.to_string(), (String::from("POST"), Box::new(handler)));
     }
 
-    pub fn post<F>(&mut self, path: &str, handler: F)
+    pub async fn put<F>(&self, path: &str, handler: F)
     where
-        F: Fn(&Request, &mut Response) + Send + Sync + 'static,
+        F: Fn(Request) -> Response + Send + Sync + 'static,
     {
-        self.register_route("POST", path, handler);
+        let mut routes = self.routes.lock().await;
+        routes.insert(path.to_string(), (String::from("PUT"), Box::new(handler)));
     }
 
-    pub fn put<F>(&mut self, path: &str, handler: F)
+    pub async fn delete<F>(&self, path: &str, handler: F)
     where
-        F: Fn(&Request, &mut Response) + Send + Sync + 'static,
+        F: Fn(Request) -> Response + Send + Sync + 'static,
     {
-        self.register_route("PUT", path, handler);
-    }
-
-    pub fn delete<F>(&mut self, path: &str, handler: F)
-    where
-        F: Fn(&Request, &mut Response) + Send + Sync + 'static,
-    {
-        self.register_route("DELETE", path, handler);
-    }
-}
-
-fn handle_connection(
-    mut stream: TcpStream,
-    routes: Arc<Mutex<HashMap<(String, String), HandlerFn>>>,
-) -> Result<(), XpressError> {
-    let mut buf_reader = BufReader::new(&stream);
-    let request = Request::from(&mut buf_reader);
-    let mut response = Response::new();
-
-    let handler = {
-        let routes = routes
-            .lock()
-            .map_err(|_| XpressError::MutexError("Failed to acquire routes lock".to_string()))?;
-        routes
-            .get(&(request.method.to_string(), request.path.to_string()))
-            .cloned()
-    };
-
-    if let Some(handler) = handler {
-        handler(&request, &mut response);
-        send_response(response, &mut stream)?;
-    } else {
-        response.status(404);
-        response.send("Not Found")?;
-        send_response(response, &mut stream)?;
-    }
-    Ok(())
-}
-
-fn send_response(res: Response, stream: &mut TcpStream) -> Result<(), XpressError> {
-    if res.sent {
-        let response_string = format!(
-            "HTTP/1.1 {}\r\n{}\r\nContent-Length: {}\r\n\r\n{}\r\n",
-            res.status,
-            res.headers
-                .iter()
-                .map(|(k, v)| format!("{}: {}", k, v))
-                .collect::<Vec<_>>()
-                .join("\r\n"),
-            res.body.len(),
-            String::from_utf8_lossy(&res.body)
+        let mut routes = self.routes.lock().await;
+        routes.insert(
+            path.to_string(),
+            (String::from("DELETE"), Box::new(handler)),
         );
-        stream.write_all(response_string.as_bytes())?;
     }
-    Ok(())
+
+    async fn handle_connection(
+        socket: TcpStream,
+        routes: Arc<Mutex<HashMap<String, (String, Handler)>>>,
+    ) -> Result<(), XpressError> {
+        let mut buffer = BufReader::new(socket);
+        let request = Request::from(&mut buffer).await?;
+        let response = Self::route_request(&request, &routes).await;
+        let response_str = Self::format_response(&response.unwrap());
+
+        buffer.get_mut().write_all(response_str.as_bytes()).await?;
+        buffer.get_mut().flush().await?;
+
+        Ok(())
+    }
+
+    async fn route_request(
+        request: &Request,
+        routes: &Arc<Mutex<HashMap<String, (String, Handler)>>>,
+    ) -> Option<Response> {
+        let routes = routes.lock().await;
+        routes.get(&request.path).and_then(|(method, handler)| {
+            if *method == request.method {
+                Some(handler(request.clone()))
+            } else {
+                None
+            }
+        })
+    }
+
+    fn format_response(response: &Response) -> String {
+        let status_text = match response.status {
+            200 => "OK",
+            404 => "Not Found",
+            _ => "Unknown",
+        };
+
+        let mut headers_str = String::new();
+        for (key, value) in &response.headers {
+            headers_str.push_str(&format!("{}: {}\r\n", key, value));
+        }
+
+        format!(
+            "HTTP/1.1 {} {}\r\n\
+            Content-Length: {}\r\n\
+            {}\r\n\
+            {}",
+            response.status,
+            status_text,
+            response.body.len(),
+            headers_str,
+            String::from_utf8_lossy(&response.body)
+        )
+    }
 }
