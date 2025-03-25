@@ -15,7 +15,8 @@ use std::{
 };
 use thread_pool::ThreadPool;
 
-type HandlerFn = Arc<dyn Fn(&Request, &mut Response) + Send + Sync + 'static>;
+type HandlerFn =
+    Arc<dyn Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static>;
 
 pub struct Xpress {
     address: String,
@@ -30,8 +31,8 @@ impl Xpress {
         }
     }
 
-    pub fn listen(&self) {
-        let listener = TcpListener::bind(&self.address).expect("Failed to bind to address");
+    pub fn listen(&self) -> Result<(), XpressError> {
+        let listener = TcpListener::bind(&self.address).map_err(|e| XpressError::IoError(e))?;
         let pool = ThreadPool::new(num_cpus::get());
 
         for stream in listener.incoming() {
@@ -45,47 +46,56 @@ impl Xpress {
                     });
                 }
                 Err(err) => {
-                    eprintln!("Failed to accept connection: {}", err);
+                    return Err(XpressError::ConnectionError(err.to_string()));
                 }
             }
         }
+        Ok(())
     }
 
-    fn register_route<F>(&mut self, method: &str, path: &str, handler: F)
+    fn register_route<F>(&mut self, method: &str, path: &str, handler: F) -> Result<(), XpressError>
     where
-        F: Fn(&Request, &mut Response) + Send + Sync + 'static,
+        F: Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static,
     {
-        let mut routes = self.routes.lock().unwrap();
+        let mut routes = self
+            .routes
+            .lock()
+            .map_err(|_| XpressError::MutexError("Failed to acquire routes lock".to_string()))?;
 
         routes.insert((method.to_string(), path.to_string()), Arc::new(handler));
+        Ok(())
     }
 
-    pub fn get<F>(&mut self, path: &str, handler: F)
+    pub fn get<F>(&mut self, path: &str, handler: F) -> Result<(), XpressError>
     where
-        F: Fn(&Request, &mut Response) + Send + Sync + 'static,
+        F: Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static,
     {
-        self.register_route("GET", path, handler);
+        self.register_route("GET", path, handler)?;
+        Ok(())
     }
 
-    pub fn post<F>(&mut self, path: &str, handler: F)
+    pub fn post<F>(&mut self, path: &str, handler: F) -> Result<(), XpressError>
     where
-        F: Fn(&Request, &mut Response) + Send + Sync + 'static,
+        F: Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static,
     {
-        self.register_route("POST", path, handler);
+        self.register_route("POST", path, handler)?;
+        Ok(())
     }
 
-    pub fn put<F>(&mut self, path: &str, handler: F)
+    pub fn put<F>(&mut self, path: &str, handler: F) -> Result<(), XpressError>
     where
-        F: Fn(&Request, &mut Response) + Send + Sync + 'static,
+        F: Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static,
     {
-        self.register_route("PUT", path, handler);
+        self.register_route("PUT", path, handler)?;
+        Ok(())
     }
 
-    pub fn delete<F>(&mut self, path: &str, handler: F)
+    pub fn delete<F>(&mut self, path: &str, handler: F) -> Result<(), XpressError>
     where
-        F: Fn(&Request, &mut Response) + Send + Sync + 'static,
+        F: Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static,
     {
-        self.register_route("DELETE", path, handler);
+        self.register_route("DELETE", path, handler)?;
+        Ok(())
     }
 }
 
@@ -107,7 +117,7 @@ fn handle_connection(
     };
 
     if let Some(handler) = handler {
-        handler(&request, &mut response);
+        handler(&request, &mut response)?;
         send_response(response, &mut stream)?;
     } else {
         response.status(404);

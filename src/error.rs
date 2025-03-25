@@ -6,6 +6,7 @@ pub enum XpressError {
     JsonError(serde_json::Error),
     MutexError(String),
     FileNotFound(String),
+    ConnectionError(String),
     Custom(String),
 }
 
@@ -16,6 +17,7 @@ impl fmt::Display for XpressError {
             XpressError::JsonError(err) => write!(f, "JSON Error: {}", err),
             XpressError::MutexError(msg) => write!(f, "Mutex Lock Error: {}", msg),
             XpressError::FileNotFound(path) => write!(f, "File Not Found: {}", path),
+            XpressError::ConnectionError(msg) => write!(f, "Connection Error: {}", msg),
             XpressError::Custom(msg) => write!(f, "Error: {}", msg),
         }
     }
