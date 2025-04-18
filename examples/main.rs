@@ -4,7 +4,7 @@ use std::{
     thread,
     time::Duration,
 };
-use xpress::{error::XpressError, Xpress};
+use xpress::{Xpress, XpressError};
 
 struct AppState {
     users: Arc<Mutex<Vec<User>>>,
