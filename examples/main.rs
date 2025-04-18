@@ -62,7 +62,7 @@ fn main() -> Result<(), XpressError> {
     let users_post = Arc::clone(&app_state.users);
 
     app.post("/users", move |req, res| {
-        match serde_json::from_str::<User>(&req.body) {
+        match req.from_json::<User>() {
             Ok(user) => {
                 let mut users = users_post
                     .lock()
@@ -73,15 +73,15 @@ fn main() -> Result<(), XpressError> {
                     user,
                 };
                 res.json(&response)?;
-
-                Ok(())
             }
+
             Err(_) => {
                 res.status(400);
                 res.send("Invalid user data")?;
-                Ok(())
             }
         }
+
+        Ok(())
     })?;
 
     println!("Server running on port {}", PORT);

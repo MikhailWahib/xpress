@@ -4,6 +4,8 @@ use std::{
     net::TcpStream,
 };
 
+use crate::XpressError;
+
 #[derive(Debug)]
 pub struct Request {
     pub path: String,
@@ -85,5 +87,16 @@ impl Request {
         }
 
         request
+    }
+
+    pub fn from_json<T: serde::de::DeserializeOwned>(&self) -> Result<T, XpressError> {
+        if self.body.is_empty() {
+            return Err(XpressError::Custom("Empty request body".to_string()));
+        }
+
+        match serde_json::from_str::<T>(&self.body) {
+            Ok(user) => Ok(user),
+            Err(e) => Err(XpressError::JsonError(e)),
+        }
     }
 }
