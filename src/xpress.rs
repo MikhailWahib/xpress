@@ -124,18 +124,20 @@ fn handle_connection(
 
 fn send_response(res: Response, stream: &mut TcpStream) -> Result<(), XpressError> {
     if res.sent {
-        let response_string = format!(
-            "HTTP/1.1 {}\r\n{}\r\nContent-Length: {}\r\n\r\n{}\r\n",
+        let headers = format!(
+            "HTTP/1.1 {}\r\n{}\r\nContent-Length: {}\r\n\r\n",
             res.status,
             res.headers
                 .iter()
                 .map(|(k, v)| format!("{}: {}", k, v))
                 .collect::<Vec<_>>()
                 .join("\r\n"),
-            res.body.len(),
-            String::from_utf8_lossy(&res.body)
+            res.body.len()
         );
-        stream.write_all(response_string.as_bytes())?;
+
+        stream.write_all(headers.as_bytes())?;
+        stream.write_all(&res.body)?;
+        stream.flush()?;
     }
     Ok(())
 }
