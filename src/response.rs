@@ -29,7 +29,6 @@ impl Response {
 
     pub fn send(&mut self, body: impl Into<Vec<u8>>) -> Result<(), XpressError> {
         self.body = body.into();
-        self.sent = true;
         Ok(())
     }
 
@@ -37,7 +36,6 @@ impl Response {
         self.headers
             .insert("Content-Type".to_string(), "application/json".to_string());
         self.body = serde_json::to_vec(body).map_err(XpressError::JsonError)?;
-        self.sent = true;
         Ok(())
     }
 
@@ -46,7 +44,6 @@ impl Response {
             .insert("Content-Type".to_string(), "text/html".to_string());
 
         self.body = std::fs::read(path).map_err(|_| XpressError::FileNotFound(path.to_string()))?;
-        self.sent = true;
         Ok(())
     }
 }

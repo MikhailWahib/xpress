@@ -38,13 +38,13 @@ fn main() -> Result<(), XpressError> {
             res.send(format!("Error rendering HTML: {}", err))?;
             Ok(())
         }
-    })?;
+    });
 
     app.get("/delay", |_req, res| {
         thread::sleep(Duration::from_secs(10));
         res.send("Am I Late?")?;
         Ok(())
-    })?;
+    });
 
     let users_get = Arc::clone(&app_state.users);
     app.get("/users", move |_req, res| match users_get.lock() {
@@ -57,7 +57,7 @@ fn main() -> Result<(), XpressError> {
             res.send("Internal Server Error!")?;
             Ok(())
         }
-    })?;
+    });
 
     let users_post = Arc::clone(&app_state.users);
 
@@ -82,7 +82,7 @@ fn main() -> Result<(), XpressError> {
         }
 
         Ok(())
-    })?;
+    });
 
     println!("Server running on port {}", PORT);
     app.listen()?;
