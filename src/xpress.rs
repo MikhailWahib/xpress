@@ -1,41 +1,37 @@
-use crate::error::XpressError;
 use crate::request::Request;
 use crate::response::Response;
 use crate::thread_pool::ThreadPool;
+use crate::{error::XpressError, router::Router};
+use std::sync::Arc;
 use std::{
-    collections::HashMap,
     io::{BufReader, Write},
     net::{TcpListener, TcpStream},
-    sync::Arc,
 };
-
-type Handler = Box<dyn Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync>;
-type Routes = HashMap<(String, String), Handler>;
 
 pub struct Xpress {
     address: String,
-    routes: Routes,
+    router: Router,
 }
 
 impl Xpress {
     pub fn new(address: &str) -> Self {
         Self {
             address: address.to_string(),
-            routes: HashMap::new(),
+            router: Router::new(),
         }
     }
 
     pub fn listen(self) -> Result<(), XpressError> {
         let listener = TcpListener::bind(&self.address)?;
-        let routes = Arc::new(self.routes);
         let pool = ThreadPool::new(num_cpus::get());
+        let router = Arc::new(self.router);
 
         for stream in listener.incoming() {
             let stream = stream?;
-            let routes = Arc::clone(&routes);
+            let router = Arc::clone(&router);
 
             pool.execute(move || {
-                if let Err(err) = Self::handle_connection(stream, &routes) {
+                if let Err(err) = Self::handle_connection(stream, &router) {
                     eprintln!("Connection error: {}", err);
                 }
             });
@@ -43,53 +39,38 @@ impl Xpress {
         Ok(())
     }
 
-    pub fn get<F>(&mut self, path: &str, handler: F)
-    where
-        F: Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static,
-    {
-        self.routes
-            .insert(("GET".to_string(), path.to_string()), Box::new(handler));
-    }
-
-    pub fn post<F>(&mut self, path: &str, handler: F)
-    where
-        F: Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static,
-    {
-        self.routes
-            .insert(("POST".to_string(), path.to_string()), Box::new(handler));
-    }
-
-    pub fn put<F>(&mut self, path: &str, handler: F)
-    where
-        F: Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static,
-    {
-        self.routes
-            .insert(("PUT".to_string(), path.to_string()), Box::new(handler));
-    }
-
-    pub fn delete<F>(&mut self, path: &str, handler: F)
-    where
-        F: Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static,
-    {
-        self.routes
-            .insert(("DELETE".to_string(), path.to_string()), Box::new(handler));
-    }
-
-    fn handle_connection(mut stream: TcpStream, routes: &Routes) -> Result<(), XpressError> {
+    fn handle_connection(mut stream: TcpStream, router: &Router) -> Result<(), XpressError> {
         let mut buf_reader = BufReader::new(&stream);
-        let request = Request::from(&mut buf_reader);
+        let mut request = Request::from(&mut buf_reader);
         let mut response = Response::new();
 
-        let key = (request.method.clone(), request.path.clone());
+        let result = (|| {
+            let Some((handler, params)) =
+                router.resolve(request.method.clone(), request.path.clone())
+            else {
+                return Err(XpressError::NotFound(format!(
+                    "{} {}",
+                    request.method, request.path
+                )));
+            };
 
-        if let Some(handler) = routes.get(&key) {
+            request.params = params;
             handler(&request, &mut response)?;
-        } else {
-            response.status(404);
-            response.send("Not Found")?;
+            Ok(response)
+        })();
+
+        match result {
+            Ok(resp) => Self::send_response(resp, &mut stream)?,
+            Err(err) => {
+                // build error response
+                let mut resp = Response::new();
+                resp.status = err.status_code();
+                resp.body = format!("Error: {}", err).into();
+                Self::send_response(resp, &mut stream)?;
+            }
         }
 
-        Self::send_response(response, &mut stream)
+        Ok(())
     }
 
     fn send_response(response: Response, stream: &mut TcpStream) -> Result<(), XpressError> {
@@ -110,5 +91,41 @@ impl Xpress {
         stream.flush()?;
 
         Ok(())
+    }
+
+    pub fn get<F>(&mut self, path: &str, handler: F)
+    where
+        F: Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static,
+    {
+        self.router
+            .register_route(format!("GET {path}"), Box::new(handler))
+            .unwrap();
+    }
+
+    pub fn post<F>(&mut self, path: &str, handler: F)
+    where
+        F: Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static,
+    {
+        self.router
+            .register_route(format!("POST {path}"), Box::new(handler))
+            .unwrap();
+    }
+
+    pub fn put<F>(&mut self, path: &str, handler: F)
+    where
+        F: Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static,
+    {
+        self.router
+            .register_route(format!("PUT {path}"), Box::new(handler))
+            .unwrap();
+    }
+
+    pub fn delete<F>(&mut self, path: &str, handler: F)
+    where
+        F: Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync + 'static,
+    {
+        self.router
+            .register_route(format!("DELETE {path}"), Box::new(handler))
+            .unwrap();
     }
 }

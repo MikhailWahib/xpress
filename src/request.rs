@@ -8,12 +8,12 @@ use crate::XpressError;
 
 #[derive(Debug)]
 pub struct Request {
-    pub path: String,
-    pub method: String,
-    pub headers: HashMap<String, String>,
+    pub(crate) path: String,
+    pub(crate) method: String,
+    pub(crate) headers: HashMap<String, String>,
     pub params: HashMap<String, String>,
     pub query: HashMap<String, String>,
-    pub body: String,
+    pub(crate) body: String,
 }
 
 impl Request {
@@ -28,7 +28,20 @@ impl Request {
         }
     }
 
-    pub fn from(buf_reader: &mut BufReader<&TcpStream>) -> Self {
+    pub fn from_json<T: serde::de::DeserializeOwned>(&self) -> Result<T, XpressError> {
+        if self.body.is_empty() {
+            return Err(XpressError::Custom("Empty request body".to_string()));
+        }
+
+        match serde_json::from_str::<T>(&self.body) {
+            Ok(user) => Ok(user),
+            Err(e) => Err(XpressError::JsonError(e)),
+        }
+    }
+}
+
+impl From<&mut BufReader<&TcpStream>> for Request {
+    fn from(buf_reader: &mut BufReader<&TcpStream>) -> Self {
         let mut request = Request::new();
         let mut lines = buf_reader.lines();
 
@@ -87,16 +100,5 @@ impl Request {
         }
 
         request
-    }
-
-    pub fn from_json<T: serde::de::DeserializeOwned>(&self) -> Result<T, XpressError> {
-        if self.body.is_empty() {
-            return Err(XpressError::Custom("Empty request body".to_string()));
-        }
-
-        match serde_json::from_str::<T>(&self.body) {
-            Ok(user) => Ok(user),
-            Err(e) => Err(XpressError::JsonError(e)),
-        }
     }
 }

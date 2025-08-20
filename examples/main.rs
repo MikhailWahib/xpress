@@ -40,6 +40,13 @@ fn main() -> Result<(), XpressError> {
         }
     });
 
+    app.get("/test/:id", |req, res| {
+        let id = req.params.get("id").unwrap();
+        let foo = req.query.get("foo").unwrap();
+        res.send(format!("{} {}", id.clone(), foo.clone()))?;
+        Ok(())
+    });
+
     app.get("/delay", |_req, res| {
         thread::sleep(Duration::from_secs(10));
         res.send("Am I Late?")?;
