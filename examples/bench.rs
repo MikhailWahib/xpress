@@ -51,7 +51,7 @@ fn main() -> Result<(), XpressError> {
             res.send(format!("Error rendering HTML: {}", err))?;
             Ok(())
         }
-    })?;
+    });
 
     let users_get = Arc::clone(&app_state.users);
 
@@ -75,7 +75,7 @@ fn main() -> Result<(), XpressError> {
             }
         }
         Ok(())
-    })?;
+    });
 
     let users_post = Arc::clone(&app_state.users);
     app.post("/users", move |req, res| {
@@ -99,7 +99,7 @@ fn main() -> Result<(), XpressError> {
         }
 
         Ok(())
-    })?;
+    });
 
     println!("Server running on port {}", PORT);
     app.listen()?;

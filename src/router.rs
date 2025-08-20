@@ -3,10 +3,52 @@ use std::{
     fmt::{self, Debug},
 };
 
-use crate::{request::Request, response::Response, XpressError};
+use crate::{
+    parser::{parse_path_segments, parse_query},
+    request::Request,
+    response::Response,
+    XpressError,
+};
 
 pub(crate) type Handler =
     Box<dyn Fn(&Request, &mut Response) -> Result<(), XpressError> + Send + Sync>;
+
+pub(crate) struct Router {
+    routes: Vec<Route>,
+}
+
+impl Router {
+    pub(crate) fn new() -> Self {
+        Self { routes: Vec::new() }
+    }
+
+    pub(crate) fn register_route(
+        &mut self,
+        route_str: String,
+        handler: Handler,
+    ) -> Result<(), XpressError> {
+        let route_def = RouteDef::try_from(route_str.as_str())?;
+
+        let route = route_def.with_handler(handler);
+        self.routes.push(route);
+        Ok(())
+    }
+
+    pub fn resolve<'a>(
+        &self,
+        method: String,
+        path: String,
+    ) -> Option<(&Handler, HashMap<String, String>)> {
+        for route in &self.routes {
+            if route.method == method {
+                if let Some(params) = route.matches(&path) {
+                    return Some((&route.handler, params));
+                }
+            }
+        }
+        None
+    }
+}
 
 struct Route {
     _path: String,
@@ -16,7 +58,7 @@ struct Route {
 }
 
 #[derive(Debug)]
-enum Segment {
+pub(crate) enum Segment {
     Static(String),
     Dynamic(String),
 }
@@ -98,30 +140,10 @@ impl TryFrom<&str> for RouteDef {
             )));
         };
 
-        path_part
-            .split('/')
-            .filter(|p| !p.is_empty())
-            .for_each(|p| {
-                if p.starts_with(':') {
-                    route_def
-                        .segments
-                        .push(Segment::Dynamic(p[1..].to_string()));
-                } else {
-                    route_def.segments.push(Segment::Static(p.to_string()));
-                }
-            });
+        route_def.segments = parse_path_segments(path_part);
 
-        if let Some(query_part) = route.next() {
-            route_def.query_params = query_part
-                .split('&')
-                .filter_map(|pair| {
-                    let mut kv = pair.split('=');
-                    Some((
-                        kv.next()?.to_string(),
-                        kv.next().unwrap_or_default().to_string(),
-                    ))
-                })
-                .collect();
+        if let Some(query) = route.next() {
+            route_def.query_params = parse_query(query);
         }
 
         Ok(route_def)
@@ -136,42 +158,5 @@ impl RouteDef {
             segments: self.segments,
             handler,
         }
-    }
-}
-
-pub(crate) struct Router {
-    routes: Vec<Route>,
-}
-
-impl Router {
-    pub(crate) fn new() -> Self {
-        Self { routes: Vec::new() }
-    }
-
-    pub(crate) fn register_route(
-        &mut self,
-        route_str: String,
-        handler: Handler,
-    ) -> Result<(), XpressError> {
-        let route_def = RouteDef::try_from(route_str.as_str())?;
-
-        let route = route_def.with_handler(handler);
-        self.routes.push(route);
-        Ok(())
-    }
-
-    pub fn resolve<'a>(
-        &self,
-        method: String,
-        path: String,
-    ) -> Option<(&Handler, HashMap<String, String>)> {
-        for route in &self.routes {
-            if route.method == method {
-                if let Some(params) = route.matches(&path) {
-                    return Some((&route.handler, params));
-                }
-            }
-        }
-        None
     }
 }

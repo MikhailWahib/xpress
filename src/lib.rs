@@ -1,8 +1,9 @@
-pub mod error;
-pub mod request;
-pub mod response;
-pub mod router;
+pub(crate) mod error;
+pub(crate) mod parser;
+pub(crate) mod request;
+pub(crate) mod response;
+pub(crate) mod router;
 mod thread_pool;
-pub mod xpress;
+pub(crate) mod xpress;
 pub use error::XpressError;
 pub use xpress::Xpress;

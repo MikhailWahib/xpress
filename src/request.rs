@@ -4,7 +4,7 @@ use std::{
     net::TcpStream,
 };
 
-use crate::XpressError;
+use crate::{parser::parse_query, XpressError};
 
 #[derive(Debug)]
 pub struct Request {
@@ -17,7 +17,7 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn new() -> Self {
+    pub fn default() -> Self {
         Self {
             path: String::new(),
             method: String::new(),
@@ -40,65 +40,55 @@ impl Request {
     }
 }
 
-impl From<&mut BufReader<&TcpStream>> for Request {
-    fn from(buf_reader: &mut BufReader<&TcpStream>) -> Self {
-        let mut request = Request::new();
+impl<'a> TryFrom<&'a mut BufReader<&TcpStream>> for Request {
+    type Error = XpressError;
+
+    fn try_from(buf_reader: &'a mut BufReader<&TcpStream>) -> Result<Self, Self::Error> {
+        let mut request = Request::default();
         let mut lines = buf_reader.lines();
 
-        // Parse req line
-        if let Some(Ok(request_line)) = lines.next() {
-            let parts: Vec<&str> = request_line.split_whitespace().collect();
-            if parts.len() == 3 {
-                request.method = parts[0].to_string();
-                request.path = parts[1].to_string();
+        let request_line = lines
+            .next()
+            .ok_or_else(|| XpressError::ParsingError("Missing request line".into()))??;
 
-                // parse query params
-                if let Some((path, query)) = request.path.clone().split_once('?') {
-                    request.path = path.to_string();
-                    request.query = query
-                        .split('&')
-                        .filter_map(|pair| {
-                            let mut kv = pair.split('=');
-                            Some((
-                                kv.next()?.to_string(),
-                                kv.next().unwrap_or_default().to_string(),
-                            ))
-                        })
-                        .collect();
-                }
-            }
+        let mut parts = request_line.split_whitespace();
+        request.method = parts.next().unwrap_or("").to_string();
+        let raw_path = parts.next().unwrap_or("");
+        if request.method.is_empty() || raw_path.is_empty() {
+            return Err(XpressError::ParsingError(format!(
+                "Malformed request line: {}",
+                request_line
+            )));
         }
 
-        // Parse headers
-        let mut headers = HashMap::new();
-        for line in lines.by_ref() {
-            let line = match line {
-                Ok(line) => line,
-                Err(_) => break,
-            };
+        if let Some((path, query)) = raw_path.split_once('?') {
+            request.path = path.to_string();
+            request.query = parse_query(query);
+        } else {
+            request.path = raw_path.to_string();
+        }
 
+        for line in lines.by_ref() {
+            let line = line?;
             if line.is_empty() {
                 break;
             }
-
             if let Some((key, value)) = line.split_once(": ") {
-                headers.insert(key.to_string(), value.to_string());
+                request.headers.insert(key.to_string(), value.to_string());
             }
         }
-        request.headers = headers;
 
-        // Parse body if Content-Length header is present
         if let Some(content_length) = request
             .headers
             .get("Content-Length")
             .and_then(|cl| cl.parse::<usize>().ok())
         {
             let mut body = vec![0; content_length];
-            if buf_reader.read_exact(&mut body).is_ok() {
-                request.body = String::from_utf8_lossy(&body).to_string();
-            }
+            buf_reader.read_exact(&mut body)?;
+            request.body = String::from_utf8(body)
+                .map_err(|_| XpressError::ParsingError("Invalid UTF-8 in body".into()))?;
         }
 
-        request
+        Ok(request)
     }
 }

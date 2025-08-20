@@ -41,7 +41,7 @@ impl Xpress {
 
     fn handle_connection(mut stream: TcpStream, router: &Router) -> Result<(), XpressError> {
         let mut buf_reader = BufReader::new(&stream);
-        let mut request = Request::from(&mut buf_reader);
+        let mut request = Request::try_from(&mut buf_reader)?;
         let mut response = Response::new();
 
         let result = (|| {
