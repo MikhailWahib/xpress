@@ -40,33 +40,46 @@ impl Xpress {
     }
 
     fn handle_connection(mut stream: TcpStream, router: &Router) -> Result<(), XpressError> {
-        let mut buf_reader = BufReader::new(&stream);
-        let mut request = Request::try_from(&mut buf_reader)?;
-        let mut response = Response::new();
+        let request = {
+            let mut buf_reader = BufReader::new(&mut stream);
+            match Request::try_from(&mut buf_reader) {
+                Ok(req) => Some(req),
+                Err(e) => {
+                    eprintln!("Request parsing error: {}", e);
+                    None
+                }
+            }
+        };
 
-        let result = (|| {
-            let Some((handler, params)) =
-                router.resolve(request.method.clone(), request.path.clone())
-            else {
-                return Err(XpressError::NotFound(format!(
-                    "{} {}",
-                    request.method, request.path
-                )));
+        if let Some(mut req) = request {
+            let mut response = Response::new();
+            let result = (|| {
+                let Some((handler, params)) = router.resolve(req.method.clone(), req.path.clone())
+                else {
+                    return Err(XpressError::NotFound(format!(
+                        "{} {}",
+                        req.method, req.path
+                    )));
+                };
+                req.params = params;
+                handler(&req, &mut response)?;
+                Ok(response)
+            })();
+
+            let mut resp = match result {
+                Ok(resp) => resp,
+                Err(err) => {
+                    let mut resp = Response::new();
+                    resp.status = err.status_code();
+                    resp.body = format!("Error: {}", err).into();
+                    resp
+                }
             };
 
-            request.params = params;
-            handler(&request, &mut response)?;
-            Ok(response)
-        })();
+            resp.headers
+                .insert("Connection".to_string(), "close".to_string());
 
-        match result {
-            Ok(resp) => Self::send_response(resp, &mut stream)?,
-            Err(err) => {
-                let mut resp = Response::new();
-                resp.status = err.status_code();
-                resp.body = format!("Error: {}", err).into();
-                Self::send_response(resp, &mut stream)?;
-            }
+            Self::send_response(resp, &mut stream)?;
         }
 
         Ok(())

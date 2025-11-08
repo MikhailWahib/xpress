@@ -3,7 +3,7 @@
 set -euo pipefail
 
 HOST="http://127.0.0.1:8080"
-DURATION="30s"
+DURATION="10s"
 THREADS=12
 CONNECTIONS=100
 
@@ -60,4 +60,4 @@ wrk -t$THREADS -c$CONNECTIONS -d$DURATION -s post.lua $HOST
 
 rm post.lua
 
-echo -e "\n✅ Benchmark complete.
+echo -e "\n✅ Benchmark complete."

@@ -40,10 +40,10 @@ impl Request {
     }
 }
 
-impl<'a> TryFrom<&'a mut BufReader<&TcpStream>> for Request {
+impl TryFrom<&mut BufReader<&mut TcpStream>> for Request {
     type Error = XpressError;
 
-    fn try_from(buf_reader: &'a mut BufReader<&TcpStream>) -> Result<Self, Self::Error> {
+    fn try_from(buf_reader: &mut BufReader<&mut TcpStream>) -> Result<Self, Self::Error> {
         let mut request = Request::default();
         let mut lines = buf_reader.lines();
 
