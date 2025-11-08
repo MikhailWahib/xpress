@@ -62,7 +62,6 @@ impl Xpress {
         match result {
             Ok(resp) => Self::send_response(resp, &mut stream)?,
             Err(err) => {
-                // build error response
                 let mut resp = Response::new();
                 resp.status = err.status_code();
                 resp.body = format!("Error: {}", err).into();
